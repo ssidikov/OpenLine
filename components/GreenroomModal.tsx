@@ -59,50 +59,6 @@ export default function GreenroomModal({ roomId, initialMode = 'video', onJoin }
     }
   };
 
-  // Start preview stream
-  const startPreview = async (config: UserMediaConfig) => {
-    setIsLoading(true);
-    setErrorMsg(null);
-
-    // Stop existing stream
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => {
-        track.enabled = false;
-        track.stop();
-      });
-      streamRef.current = null;
-    }
-
-    if (videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.srcObject = null;
-    }
-
-    try {
-      const stream = await getUserMediaStream(config);
-      streamRef.current = stream;
-
-      // Apply initial mute state
-      stream.getAudioTracks().forEach((t) => (t.enabled = !isAudioMuted));
-      if (config.callMode === 'video') {
-        stream.getVideoTracks().forEach((t) => (t.enabled = !isVideoMuted));
-      }
-
-      if (videoRef.current && config.callMode === 'video') {
-        videoRef.current.srcObject = stream;
-      }
-
-      // Audio meter setup
-      setupAudioMeter(stream);
-      await loadDevices();
-      setIsLoading(false);
-    } catch (err) {
-      console.error('Greenroom preview error:', err);
-      setErrorMsg('Microphone or camera permission denied. Please allow browser access.');
-      setIsLoading(false);
-    }
-  };
-
   const setupAudioMeter = (stream: MediaStream) => {
     try {
       closeAudioContext();
@@ -138,14 +94,61 @@ export default function GreenroomModal({ roomId, initialMode = 'video', onJoin }
   };
 
   useEffect(() => {
-    startPreview({
-      callMode,
-      quality: selectedQuality,
-      videoDeviceId: selectedCamera || undefined,
-      audioDeviceId: selectedMic || undefined,
-    });
+    let active = true;
+
+    const initPreview = async () => {
+      // Stop existing stream
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => {
+          track.enabled = false;
+          track.stop();
+        });
+        streamRef.current = null;
+      }
+
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.srcObject = null;
+      }
+
+      try {
+        const config: UserMediaConfig = {
+          callMode,
+          quality: selectedQuality,
+          videoDeviceId: selectedCamera || undefined,
+          audioDeviceId: selectedMic || undefined,
+        };
+
+        const stream = await getUserMediaStream(config);
+        if (!active) return;
+        streamRef.current = stream;
+
+        // Apply initial mute state
+        stream.getAudioTracks().forEach((t) => (t.enabled = !isAudioMuted));
+        if (config.callMode === 'video') {
+          stream.getVideoTracks().forEach((t) => (t.enabled = !isVideoMuted));
+        }
+
+        if (videoRef.current && config.callMode === 'video') {
+          videoRef.current.srcObject = stream;
+        }
+
+        // Audio meter setup
+        setupAudioMeter(stream);
+        await loadDevices();
+        setIsLoading(false);
+      } catch (err) {
+        if (!active) return;
+        console.error('Greenroom preview error:', err);
+        setErrorMsg('Microphone or camera permission denied. Please allow browser access.');
+        setIsLoading(false);
+      }
+    };
+
+    initPreview();
 
     return () => {
+      active = false;
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       closeAudioContext();
       if (!isJoinedRef.current && streamRef.current) {

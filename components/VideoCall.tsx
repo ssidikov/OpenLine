@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import type Peer from 'peerjs';
 import type { MediaConnection, DataConnection } from 'peerjs';
-import { VideoQuality, QUALITY_PRESETS, ChatMessage, UserMediaConfig } from '@/lib/types';
+import { QUALITY_PRESETS, ChatMessage, UserMediaConfig } from '@/lib/types';
 import { getUserMediaStream } from '@/lib/peer';
 import CallControls from './CallControls';
 import CopyLinkButton from './CopyLinkButton';
@@ -37,7 +37,12 @@ export default function VideoCall({ roomId, initialMode = 'video' }: VideoCallPr
   const [isVideoMuted, setIsVideoMuted] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isSwappedView, setIsSwappedView] = useState(false);
-  const [isMobileDevice, setIsMobileDevice] = useState(false);
+  const [isMobileDevice] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+    }
+    return false;
+  });
 
   // Modals & Drawers
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -51,13 +56,6 @@ export default function VideoCall({ roomId, initialMode = 'video' }: VideoCallPr
   const dataConnRef = useRef<DataConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
-
-  // Mobile detection
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setIsMobileDevice(/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent));
-    }
-  }, []);
 
   // Handle incoming/outgoing data channel for chat
   const setupDataConnection = (dataConn: DataConnection) => {
@@ -121,6 +119,18 @@ export default function VideoCall({ roomId, initialMode = 'video' }: VideoCallPr
     });
   }, []);
 
+  // Ensure local video stream is attached to local video element once greenroom is joined
+  useEffect(() => {
+    if (hasJoinedGreenroom && localVideoRef.current && localStreamRef.current && !isScreenSharing) {
+      if (localVideoRef.current.srcObject !== localStreamRef.current) {
+        localVideoRef.current.srcObject = localStreamRef.current;
+      }
+      localVideoRef.current.play().catch((err) => {
+        console.warn('Local video play error:', err);
+      });
+    }
+  }, [hasJoinedGreenroom, isScreenSharing, isSwappedView]);
+
   // Initialize WebRTC Call after user passes Greenroom preview
   const handleJoinFromGreenroom = async (config: UserMediaConfig, stream: MediaStream) => {
     setMediaConfig(config);
@@ -129,10 +139,6 @@ export default function VideoCall({ roomId, initialMode = 'video' }: VideoCallPr
 
     if (config.callMode === 'audio') {
       setIsVideoMuted(true);
-    }
-
-    if (localVideoRef.current && config.callMode !== 'audio') {
-      localVideoRef.current.srcObject = stream;
     }
 
     try {
