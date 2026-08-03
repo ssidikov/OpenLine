@@ -41,3 +41,10 @@ yarn-error.log*
 next-env.d.ts
 
 certificates
+
+/.agents
+.vscode
+.claude
+.kiro
+.cursor
+.zed
