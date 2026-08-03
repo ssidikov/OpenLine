@@ -23,16 +23,20 @@ export function createPeer(id?: string): Peer {
 export async function getUserMediaStream(config: UserMediaConfig): Promise<MediaStream> {
   const preset = QUALITY_PRESETS[config.quality] || QUALITY_PRESETS['720p'];
 
-  const videoConstraints: MediaTrackConstraints = {
-    width: { ideal: preset.width },
-    height: { ideal: preset.height },
-    frameRate: { ideal: preset.fps },
-  };
+  let videoConstraints: MediaTrackConstraints | boolean = false;
 
-  if (config.videoDeviceId) {
-    videoConstraints.deviceId = { exact: config.videoDeviceId };
-  } else if (config.facingMode) {
-    videoConstraints.facingMode = { ideal: config.facingMode };
+  if (config.callMode !== 'audio') {
+    videoConstraints = {
+      width: { ideal: preset.width },
+      height: { ideal: preset.height },
+      frameRate: { ideal: preset.fps },
+    };
+
+    if (config.videoDeviceId) {
+      videoConstraints.deviceId = { exact: config.videoDeviceId };
+    } else if (config.facingMode) {
+      videoConstraints.facingMode = { ideal: config.facingMode };
+    }
   }
 
   const audioConstraints: MediaTrackConstraints | boolean = config.audioDeviceId

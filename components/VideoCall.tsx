@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import type Peer from 'peerjs';
 import type { MediaConnection, DataConnection } from 'peerjs';
 import { VideoQuality, QUALITY_PRESETS, ChatMessage, UserMediaConfig } from '@/lib/types';
@@ -14,11 +13,10 @@ import SettingsModal from './SettingsModal';
 
 interface VideoCallProps {
   roomId: string;
+  initialMode?: 'video' | 'audio';
 }
 
-export default function VideoCall({ roomId }: VideoCallProps) {
-  const router = useRouter();
-
+export default function VideoCall({ roomId, initialMode = 'video' }: VideoCallProps) {
   // Video element refs
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -33,6 +31,7 @@ export default function VideoCall({ roomId }: VideoCallProps) {
   const [mediaConfig, setMediaConfig] = useState<UserMediaConfig>({
     quality: '720p',
     facingMode: 'user',
+    callMode: initialMode,
   });
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isVideoMuted, setIsVideoMuted] = useState(false);
@@ -111,6 +110,7 @@ export default function VideoCall({ roomId }: VideoCallProps) {
     call.on('close', () => {
       setIsConnected(false);
       if (remoteVideoRef.current) {
+        remoteVideoRef.current.pause();
         remoteVideoRef.current.srcObject = null;
       }
     });
@@ -127,7 +127,11 @@ export default function VideoCall({ roomId }: VideoCallProps) {
     localStreamRef.current = stream;
     setHasJoinedGreenroom(true);
 
-    if (localVideoRef.current) {
+    if (config.callMode === 'audio') {
+      setIsVideoMuted(true);
+    }
+
+    if (localVideoRef.current && config.callMode !== 'audio') {
       localVideoRef.current.srcObject = stream;
     }
 
@@ -230,7 +234,10 @@ export default function VideoCall({ roomId }: VideoCallProps) {
     if (isScreenSharing) {
       // Stop Screen Share & Revert to Camera Stream
       if (screenStreamRef.current) {
-        screenStreamRef.current.getTracks().forEach((track) => track.stop());
+        screenStreamRef.current.getTracks().forEach((track) => {
+          track.enabled = false;
+          track.stop();
+        });
         screenStreamRef.current = null;
       }
 
@@ -296,11 +303,18 @@ export default function VideoCall({ roomId }: VideoCallProps) {
         facingMode: nextMode,
       });
 
+      // Stop unused audio tracks from newStream
+      newStream.getAudioTracks().forEach((t) => {
+        t.enabled = false;
+        t.stop();
+      });
+
       const newVideoTrack = newStream.getVideoTracks()[0];
       if (newVideoTrack && localStreamRef.current) {
         const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
         if (oldVideoTrack) {
           localStreamRef.current.removeTrack(oldVideoTrack);
+          oldVideoTrack.enabled = false;
           oldVideoTrack.stop();
         }
         localStreamRef.current.addTrack(newVideoTrack);
@@ -379,25 +393,35 @@ export default function VideoCall({ roomId }: VideoCallProps) {
 
   // Helper to stop all active media streams & clear video elements
   const stopAllMediaTracks = useCallback(() => {
-    if (screenStreamRef.current) {
-      screenStreamRef.current.getTracks().forEach((t) => t.stop());
-      screenStreamRef.current = null;
-    }
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((t) => t.stop());
-      localStreamRef.current = null;
-    }
     if (localVideoRef.current) {
+      localVideoRef.current.pause();
       localVideoRef.current.srcObject = null;
     }
     if (remoteVideoRef.current) {
+      remoteVideoRef.current.pause();
       remoteVideoRef.current.srcObject = null;
+    }
+
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((t) => {
+        t.enabled = false;
+        t.stop();
+      });
+      screenStreamRef.current = null;
+    }
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((t) => {
+        t.enabled = false;
+        t.stop();
+      });
+      localStreamRef.current = null;
     }
   }, []);
 
-  // Hang Up
+  // Hang Up (End Call)
   const handleHangUp = () => {
     stopAllMediaTracks();
+
     if (dataConnRef.current) {
       dataConnRef.current.close();
       dataConnRef.current = null;
@@ -410,7 +434,9 @@ export default function VideoCall({ roomId }: VideoCallProps) {
       peerRef.current.destroy();
       peerRef.current = null;
     }
-    router.push('/');
+
+    // Hard navigate to home page to guarantee hardware release
+    window.location.href = '/';
   };
 
   // Keyboard Shortcuts Listener
@@ -481,7 +507,7 @@ export default function VideoCall({ roomId }: VideoCallProps) {
 
   // Show Pre-Call Greenroom stage until user joins
   if (!hasJoinedGreenroom) {
-    return <GreenroomModal roomId={roomId} onJoin={handleJoinFromGreenroom} />;
+    return <GreenroomModal roomId={roomId} initialMode={initialMode} onJoin={handleJoinFromGreenroom} />;
   }
 
   return (
@@ -494,7 +520,7 @@ export default function VideoCall({ roomId }: VideoCallProps) {
             Room: <strong className="text-zinc-100">{roomId}</strong>
           </span>
           <span className="text-[10px] px-2 py-0.5 rounded-md bg-zinc-800 text-emerald-400 font-semibold border border-zinc-700/50">
-            {mediaConfig.quality}
+            {mediaConfig.callMode === 'audio' ? 'Audio Call' : mediaConfig.quality}
           </span>
         </div>
 
@@ -512,9 +538,26 @@ export default function VideoCall({ roomId }: VideoCallProps) {
           playsInline
           className={`w-full h-full object-cover transition-all duration-300 ${
             isSwappedView ? 'w-36 h-48 md:w-56 md:h-72 absolute bottom-4 right-4 z-30 rounded-2xl border-2 border-zinc-700 shadow-2xl cursor-pointer' : 'w-full h-full'
-          } ${isConnected ? 'opacity-100' : 'opacity-0 hidden'}`}
+          } ${isConnected && mediaConfig.callMode !== 'audio' ? 'opacity-100' : 'opacity-0 hidden'}`}
           onClick={isSwappedView ? () => setIsSwappedView(false) : undefined}
         />
+
+        {/* Remote Audio Avatar Box (Audio Only Mode or Video Off) */}
+        {isConnected && mediaConfig.callMode === 'audio' && !isSwappedView && (
+          <div className="flex flex-col items-center justify-center gap-4 text-center p-6 z-10">
+            <div className="w-28 h-28 rounded-full bg-emerald-500/10 border-2 border-emerald-500/30 flex items-center justify-center animate-pulse shadow-2xl">
+              <div className="w-20 h-20 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
+                <svg className="w-10 h-10 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-lg font-bold text-zinc-100">Peer Connected</h3>
+              <p className="text-xs text-emerald-400 font-medium">Audio Call Active</p>
+            </div>
+          </div>
+        )}
 
         {/* Safari Play Overlay */}
         {needsPlayInteraction && (
@@ -527,7 +570,7 @@ export default function VideoCall({ roomId }: VideoCallProps) {
               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
               </svg>
-              Enable Remote Video Playback
+              Enable Remote Audio/Video Playback
             </button>
           </div>
         )}
@@ -561,7 +604,7 @@ export default function VideoCall({ roomId }: VideoCallProps) {
             </div>
             <p className="text-sm text-zinc-200">{errorMessage}</p>
             <button
-              onClick={() => router.push('/')}
+              onClick={handleHangUp}
               type="button"
               className="px-5 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium border border-zinc-700 transition cursor-pointer"
             >
@@ -570,15 +613,15 @@ export default function VideoCall({ roomId }: VideoCallProps) {
           </div>
         )}
 
-        {/* Local Video Stream (Floating PiP or Swapped Main Stage) */}
+        {/* Local Stream View (Floating PiP or Swapped Main Stage) */}
         <div
-          onClick={() => isConnected && setIsSwappedView((prev) => !prev)}
+          onClick={() => isConnected && mediaConfig.callMode !== 'audio' && setIsSwappedView((prev) => !prev)}
           className={`transition-all duration-300 overflow-hidden bg-zinc-950 shadow-2xl ${
             isSwappedView
               ? 'absolute inset-0 w-full h-full z-10'
               : 'absolute bottom-4 right-4 z-20 w-32 h-44 sm:w-44 sm:h-60 rounded-2xl border-2 border-zinc-700/80 cursor-pointer hover:border-emerald-500/60'
           }`}
-          title={isConnected ? 'Tap to swap views' : undefined}
+          title={isConnected && mediaConfig.callMode !== 'audio' ? 'Tap to swap views' : undefined}
         >
           <video
             ref={localVideoRef}
@@ -587,15 +630,19 @@ export default function VideoCall({ roomId }: VideoCallProps) {
             muted
             className={`w-full h-full object-cover ${
               isScreenSharing ? '' : 'transform -scale-x-100'
-            } ${isVideoMuted ? 'opacity-0' : 'opacity-100'}`}
+            } ${isVideoMuted || mediaConfig.callMode === 'audio' ? 'opacity-0' : 'opacity-100'}`}
           />
 
-          {isVideoMuted && (
-            <div className="absolute inset-0 flex items-center justify-center bg-zinc-900 text-zinc-500">
-              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M3 3l18 18" />
-              </svg>
+          {(isVideoMuted || mediaConfig.callMode === 'audio') && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-zinc-900 text-zinc-400 p-2">
+              <div className="w-10 h-10 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center">
+                <svg className="w-5 h-5 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+              </div>
+              <span className="text-[10px] text-zinc-400 font-medium">
+                {mediaConfig.callMode === 'audio' ? 'Audio Only' : 'Camera Off'}
+              </span>
             </div>
           )}
 

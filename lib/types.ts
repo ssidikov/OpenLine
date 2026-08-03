@@ -26,4 +26,5 @@ export interface UserMediaConfig {
   videoDeviceId?: string;
   quality: VideoQuality;
   facingMode?: 'user' | 'environment';
+  callMode?: 'video' | 'audio';
 }

@@ -6,10 +6,11 @@ import { getUserMediaStream } from '@/lib/peer';
 
 interface GreenroomModalProps {
   roomId: string;
+  initialMode?: 'video' | 'audio';
   onJoin: (config: UserMediaConfig, stream: MediaStream) => void;
 }
 
-export default function GreenroomModal({ roomId, onJoin }: GreenroomModalProps) {
+export default function GreenroomModal({ roomId, initialMode = 'video', onJoin }: GreenroomModalProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -17,6 +18,7 @@ export default function GreenroomModal({ roomId, onJoin }: GreenroomModalProps) 
   const animFrameRef = useRef<number | null>(null);
   const isJoinedRef = useRef<boolean>(false);
 
+  const [callMode, setCallMode] = useState<'video' | 'audio'>(initialMode);
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [mics, setMics] = useState<MediaDeviceInfo[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<string>('');
@@ -64,8 +66,16 @@ export default function GreenroomModal({ roomId, onJoin }: GreenroomModalProps) 
 
     // Stop existing stream
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current.getTracks().forEach((track) => {
+        track.enabled = false;
+        track.stop();
+      });
       streamRef.current = null;
+    }
+
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.srcObject = null;
     }
 
     try {
@@ -74,9 +84,11 @@ export default function GreenroomModal({ roomId, onJoin }: GreenroomModalProps) 
 
       // Apply initial mute state
       stream.getAudioTracks().forEach((t) => (t.enabled = !isAudioMuted));
-      stream.getVideoTracks().forEach((t) => (t.enabled = !isVideoMuted));
+      if (config.callMode === 'video') {
+        stream.getVideoTracks().forEach((t) => (t.enabled = !isVideoMuted));
+      }
 
-      if (videoRef.current) {
+      if (videoRef.current && config.callMode === 'video') {
         videoRef.current.srcObject = stream;
       }
 
@@ -86,7 +98,7 @@ export default function GreenroomModal({ roomId, onJoin }: GreenroomModalProps) 
       setIsLoading(false);
     } catch (err) {
       console.error('Greenroom preview error:', err);
-      setErrorMsg('Camera or microphone permission denied. Please allow browser access.');
+      setErrorMsg('Microphone or camera permission denied. Please allow browser access.');
       setIsLoading(false);
     }
   };
@@ -127,6 +139,7 @@ export default function GreenroomModal({ roomId, onJoin }: GreenroomModalProps) 
 
   useEffect(() => {
     startPreview({
+      callMode,
       quality: selectedQuality,
       videoDeviceId: selectedCamera || undefined,
       audioDeviceId: selectedMic || undefined,
@@ -140,7 +153,7 @@ export default function GreenroomModal({ roomId, onJoin }: GreenroomModalProps) 
         streamRef.current = null;
       }
     };
-  }, [selectedQuality, selectedCamera, selectedMic]);
+  }, [callMode, selectedQuality, selectedCamera, selectedMic]);
 
   const toggleAudio = () => {
     if (streamRef.current) {
@@ -151,7 +164,7 @@ export default function GreenroomModal({ roomId, onJoin }: GreenroomModalProps) 
   };
 
   const toggleVideo = () => {
-    if (streamRef.current) {
+    if (streamRef.current && callMode === 'video') {
       const nextState = !isVideoMuted;
       streamRef.current.getVideoTracks().forEach((t) => (t.enabled = !nextState));
       setIsVideoMuted(nextState);
@@ -166,6 +179,7 @@ export default function GreenroomModal({ roomId, onJoin }: GreenroomModalProps) 
 
       onJoin(
         {
+          callMode,
           quality: selectedQuality,
           videoDeviceId: selectedCamera || undefined,
           audioDeviceId: selectedMic || undefined,
@@ -186,88 +200,152 @@ export default function GreenroomModal({ roomId, onJoin }: GreenroomModalProps) 
               Room: <span className="font-mono text-emerald-400 font-semibold">{roomId}</span>
             </p>
           </div>
-          <div className="px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Pre-call Greenroom</span>
+
+          {/* Mode Selector Pill */}
+          <div className="flex items-center gap-1 p-1 bg-zinc-950 border border-zinc-800 rounded-2xl">
+            <button
+              type="button"
+              onClick={() => setCallMode('video')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                callMode === 'video'
+                  ? 'bg-emerald-500 text-zinc-950 shadow-md'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              <span>Video Call</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCallMode('audio')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                callMode === 'audio'
+                  ? 'bg-emerald-500 text-zinc-950 shadow-md'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+              <span>Audio Only</span>
+            </button>
           </div>
         </div>
 
         {/* Content Body */}
         <div className="p-6 space-y-6 overflow-y-auto max-h-[75vh]">
-          {/* Camera Preview */}
-          <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-zinc-950 border border-zinc-800 flex items-center justify-center group shadow-inner">
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className={`w-full h-full object-cover transform -scale-x-100 transition-opacity duration-300 ${
-                isVideoMuted || isLoading ? 'opacity-0' : 'opacity-100'
-              }`}
-            />
+          {/* Video Preview or Audio Avatar Box */}
+          {callMode === 'video' ? (
+            <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-zinc-950 border border-zinc-800 flex items-center justify-center group shadow-inner">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className={`w-full h-full object-cover transform -scale-x-100 transition-opacity duration-300 ${
+                  isVideoMuted || isLoading ? 'opacity-0' : 'opacity-100'
+                }`}
+              />
 
-            {isLoading && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-zinc-400">
-                <div className="w-8 h-8 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
-                <span className="text-xs font-medium">Starting camera preview...</span>
-              </div>
-            )}
-
-            {isVideoMuted && !isLoading && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-950/90 text-zinc-400">
-                <div className="w-14 h-14 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
-                  <svg className="w-7 h-7 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M3 3l18 18" />
-                  </svg>
+              {isLoading && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-zinc-400">
+                  <div className="w-8 h-8 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+                  <span className="text-xs font-medium">Starting camera preview...</span>
                 </div>
-                <span className="text-xs">Camera is turned off</span>
-              </div>
-            )}
+              )}
 
-            {/* In-video Quick Toggle Controls */}
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-zinc-900/80 backdrop-blur-md px-4 py-2 rounded-full border border-zinc-700/60 shadow-xl">
+              {isVideoMuted && !isLoading && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-950/90 text-zinc-400">
+                  <div className="w-14 h-14 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                    <svg className="w-7 h-7 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M3 3l18 18" />
+                    </svg>
+                  </div>
+                  <span className="text-xs">Camera is turned off</span>
+                </div>
+              )}
+
+              {/* In-video Quick Toggle Controls */}
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-zinc-900/80 backdrop-blur-md px-4 py-2 rounded-full border border-zinc-700/60 shadow-xl">
+                <button
+                  type="button"
+                  onClick={toggleAudio}
+                  className={`p-2.5 rounded-full transition cursor-pointer ${
+                    isAudioMuted ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40' : 'bg-zinc-800 text-zinc-200 hover:bg-zinc-700'
+                  }`}
+                  title={isAudioMuted ? 'Unmute microphone' : 'Mute microphone'}
+                >
+                  {isAudioMuted ? (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 3l18 18" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                    </svg>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={toggleVideo}
+                  className={`p-2.5 rounded-full transition cursor-pointer ${
+                    isVideoMuted ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40' : 'bg-zinc-800 text-zinc-200 hover:bg-zinc-700'
+                  }`}
+                  title={isVideoMuted ? 'Turn camera on' : 'Turn camera off'}
+                >
+                  {isVideoMuted ? (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 3l18 18" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* Audio Only Mode Avatar Box */
+            <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-zinc-950 border border-zinc-800 flex flex-col items-center justify-center p-6 gap-4 shadow-inner">
+              <div className="relative flex items-center justify-center">
+                <div
+                  className="w-24 h-24 rounded-full bg-emerald-500/10 border-2 border-emerald-500/30 flex items-center justify-center transition-transform duration-100"
+                  style={{ transform: `scale(${1 + (isAudioMuted ? 0 : audioLevel / 200)})` }}
+                >
+                  <div className="w-16 h-16 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
+                    <svg className="w-8 h-8 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              <div className="text-center space-y-1">
+                <h3 className="font-semibold text-sm text-zinc-200">Audio Only Call Mode</h3>
+                <p className="text-xs text-zinc-400">Your camera will be off during this call to save data.</p>
+              </div>
+
               <button
                 type="button"
                 onClick={toggleAudio}
-                className={`p-2.5 rounded-full transition cursor-pointer ${
-                  isAudioMuted ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40' : 'bg-zinc-800 text-zinc-200 hover:bg-zinc-700'
+                className={`px-5 py-2.5 rounded-full transition cursor-pointer flex items-center gap-2 text-xs font-semibold ${
+                  isAudioMuted
+                    ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
+                    : 'bg-zinc-800 text-zinc-200 hover:bg-zinc-700 border border-zinc-700'
                 }`}
-                title={isAudioMuted ? 'Unmute microphone' : 'Mute microphone'}
               >
-                {isAudioMuted ? (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 3l18 18" />
-                  </svg>
-                ) : (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                  </svg>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={toggleVideo}
-                className={`p-2.5 rounded-full transition cursor-pointer ${
-                  isVideoMuted ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40' : 'bg-zinc-800 text-zinc-200 hover:bg-zinc-700'
-                }`}
-                title={isVideoMuted ? 'Turn camera on' : 'Turn camera off'}
-              >
-                {isVideoMuted ? (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 3l18 18" />
-                  </svg>
-                ) : (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                  </svg>
-                )}
+                {isAudioMuted ? 'Unmute Mic' : 'Mute Mic'}
               </button>
             </div>
-          </div>
+          )}
 
           {/* Audio Level Meter */}
           <div className="space-y-1.5">
@@ -289,24 +367,8 @@ export default function GreenroomModal({ roomId, onJoin }: GreenroomModalProps) 
 
           {/* Device & Quality Options Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Camera Select */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-zinc-300 block">Camera Device</label>
-              <select
-                value={selectedCamera}
-                onChange={(e) => setSelectedCamera(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
-              >
-                {cameras.map((c, i) => (
-                  <option key={c.deviceId || i} value={c.deviceId}>
-                    {c.label || `Camera ${i + 1}`}
-                  </option>
-                ))}
-              </select>
-            </div>
-
             {/* Mic Select */}
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 sm:col-span-2">
               <label className="text-xs font-semibold text-zinc-300 block">Microphone Device</label>
               <select
                 value={selectedMic}
@@ -321,29 +383,41 @@ export default function GreenroomModal({ roomId, onJoin }: GreenroomModalProps) 
               </select>
             </div>
 
-            {/* Max Resolution Selector */}
-            <div className="space-y-1.5 sm:col-span-2">
-              <label className="text-xs font-semibold text-zinc-300 block">Max Video Resolution</label>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {(Object.keys(QUALITY_PRESETS) as VideoQuality[]).map((q) => (
-                  <button
-                    key={q}
-                    type="button"
-                    onClick={() => setSelectedQuality(q)}
-                    className={`py-2 px-3 rounded-xl border text-xs font-medium transition cursor-pointer flex flex-col items-center justify-center gap-0.5 ${
-                      selectedQuality === q
-                        ? 'bg-emerald-500/15 border-emerald-500 text-emerald-400'
-                        : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
-                    }`}
-                  >
-                    <span className="font-bold">{q}</span>
-                    <span className="text-[10px] opacity-70">
-                      {QUALITY_PRESETS[q].width}x{QUALITY_PRESETS[q].height}
-                    </span>
-                  </button>
-                ))}
+            {/* Camera Select (only in Video mode) */}
+            {callMode === 'video' && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-zinc-300 block">Camera Device</label>
+                <select
+                  value={selectedCamera}
+                  onChange={(e) => setSelectedCamera(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                >
+                  {cameras.map((c, i) => (
+                    <option key={c.deviceId || i} value={c.deviceId}>
+                      {c.label || `Camera ${i + 1}`}
+                    </option>
+                  ))}
+                </select>
               </div>
-            </div>
+            )}
+
+            {/* Max Resolution Selector (only in Video mode) */}
+            {callMode === 'video' && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-zinc-300 block">Max Video Resolution</label>
+                <select
+                  value={selectedQuality}
+                  onChange={(e) => setSelectedQuality(e.target.value as VideoQuality)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                >
+                  {(Object.keys(QUALITY_PRESETS) as VideoQuality[]).map((q) => (
+                    <option key={q} value={q}>
+                      {QUALITY_PRESETS[q].label} ({QUALITY_PRESETS[q].width}x{QUALITY_PRESETS[q].height})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {errorMsg && (
@@ -361,7 +435,7 @@ export default function GreenroomModal({ roomId, onJoin }: GreenroomModalProps) 
             disabled={isLoading || !!errorMsg}
             className="w-full sm:w-auto px-8 py-3.5 rounded-2xl bg-emerald-400 hover:bg-emerald-300 active:scale-97 text-zinc-950 font-bold text-sm shadow-xl shadow-emerald-500/20 transition-all duration-150 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            <span>Join Call Now</span>
+            <span>{callMode === 'audio' ? 'Join Audio Call' : 'Join Video Call'}</span>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3" />
             </svg>
